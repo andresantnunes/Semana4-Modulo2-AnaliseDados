@@ -14,7 +14,9 @@ logger.setLevel(logging.INFO)
 
 s3_client = boto3.client('s3')
 
-BUCKET_NAME = os.environ.get('BUCKET_NAME', 'exemplo-analise-dados-mod2')
+# Bucket de origem/destino dos CSVs. Sobrescrevível via variável de ambiente
+# BUCKET_NAME na configuração da function (útil para ambientes dev/stage/prod).
+BUCKET_NAME = os.environ.get('BUCKET_NAME', 'meu-bucket-nutricao')
 
 RAW_PREFIX = 'raw/'
 PROCESSED_PREFIX = 'processed/'
@@ -25,23 +27,6 @@ REQUIRED_COLUMNS = (
     "idade", "sexo", "peso_kg", "altura_m", "imc", "percentual_gordura",
     "objetivo", "valor_consulta_brl", "status",
 )
-
-# start da lambda
-def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    resultados = []
-    for bucket, key in _extrair_alvos(event):
-        try:
-            resultados.append(processar_objeto(bucket, key))
-        except Exception:
-            # Não deixa um único objeto inválido derrubar o processamento dos demais.
-            logger.exception("Falha ao processar s3://%s/%s", bucket, key)
-            resultados.append({'key': key, 'status': 'erro'})
-
-    houve_erro = any(r['status'] == 'erro' for r in resultados)
-    return {
-        'statusCode': 500 if houve_erro else 200,
-        'body': resultados,
-    }
 
 
 def categorizar_imc(imc: float) -> str:
@@ -204,3 +189,19 @@ def _extrair_alvos(event: dict[str, Any]) -> list[tuple[str, str]]:
     logger.warning("Evento sem 'Records' e sem 'key'; nada a processar.")
     return []
 
+
+def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+    resultados = []
+    for bucket, key in _extrair_alvos(event):
+        try:
+            resultados.append(processar_objeto(bucket, key))
+        except Exception:
+            # Não deixa um único objeto inválido derrubar o processamento dos demais.
+            logger.exception("Falha ao processar s3://%s/%s", bucket, key)
+            resultados.append({'key': key, 'status': 'erro'})
+
+    houve_erro = any(r['status'] == 'erro' for r in resultados)
+    return {
+        'statusCode': 500 if houve_erro else 200,
+        'body': resultados,
+    }
