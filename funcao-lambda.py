@@ -6,18 +6,21 @@ import urllib.parse
 from datetime import datetime, timezone
 from typing import Any
 
+# Bibliotecas da AWS para gerenciar recursos da AWS
 import boto3
 from botocore.exceptions import ClientError
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+# Client que conect ao S3 ou outro serviço AWS
 s3_client = boto3.client('s3')
 
-# Bucket de origem/destino dos CSVs. Sobrescrevível via variável de ambiente
-# BUCKET_NAME na configuração da function (útil para ambientes dev/stage/prod).
+# Estamos usando uma variável de ambinte chamada BUCKET_NAME
+# Tem um valor para quando não houver uma variável - meu-bucket-nutricao - valor padrão
 BUCKET_NAME = os.environ.get('BUCKET_NAME', 'meu-bucket-nutricao')
 
+# Constants
 RAW_PREFIX = 'raw/'
 PROCESSED_PREFIX = 'processed/'
 STATUS_CANCELADA = 'Cancelada'
@@ -28,9 +31,8 @@ REQUIRED_COLUMNS = (
     "objetivo", "valor_consulta_brl", "status",
 )
 
-
+# Categorizar pelo IMC
 def categorizar_imc(imc: float) -> str:
-    """Classifica a faixa de IMC segundo critérios da OMS."""
     if imc < 18.5:
         return "Abaixo do peso"
     elif imc < 25.0:
@@ -39,21 +41,15 @@ def categorizar_imc(imc: float) -> str:
         return "Sobrepeso"
     return "Obesidade"
 
-
+# função de anonimização que troca o valor dos nomes no processed
 def anonimizar_nome(nome_completo: str) -> str:
-    """Anonimiza o nome do paciente para fins de LGPD (Ex: "Ana Silva" -> "Ana S.")."""
     partes = nome_completo.split()
     if len(partes) > 1:
         return f"{partes[0]} {partes[-1][0]}."
     return nome_completo
 
-
+# Faz diversas operações nas linhas do CSV
 def transformar_linha(row: dict[str, str]) -> dict[str, Any]:
-    """Aplica as regras de limpeza/enriquecimento a uma linha do CSV bruto.
-
-    Levanta ValueError/KeyError se a linha estiver incompleta ou com tipos
-    inválidos, para que o chamador possa decidir se descarta ou propaga.
-    """
     faltantes = [c for c in REQUIRED_COLUMNS if not row.get(c)]
     if faltantes:
         raise ValueError(f"colunas ausentes/vazias: {', '.join(faltantes)}")
@@ -61,8 +57,9 @@ def transformar_linha(row: dict[str, str]) -> dict[str, Any]:
     imc = float(row['imc'])
     dt_consulta = datetime.strptime(row['data_consulta'], "%Y-%m-%d %H:%M")
 
+    # cria uma nova representação dos daods
     return {
-        "id_consulta": row["id_consulta"],
+        "id_consulta": row["id_consulta"], # colunas e uma lista de valores
         "data_consulta": row["data_consulta"],
         "ano_consulta": dt_consulta.year,
         "mes_consulta": dt_consulta.month,
@@ -82,13 +79,9 @@ def transformar_linha(row: dict[str, str]) -> dict[str, Any]:
         "processado_em": datetime.now(timezone.utc).isoformat(),
     }
 
-
+# Lê linha a linha e cria uma lista de dicionários
 def transformar_csv(csv_text: str) -> tuple[list[dict[str, Any]], int]:
-    """Transforma o texto CSV bruto, descartando cancelamentos e linhas inválidas.
-
-    Retorna (linhas_transformadas, quantidade_de_linhas_descartadas_por_erro).
-    """
-    reader = csv.DictReader(io.StringIO(csv_text))
+    reader = csv.DictReader(io.StringIO(csv_text)) # Le o CSV
     linhas_transformadas = []
     erros = 0
 
@@ -103,9 +96,8 @@ def transformar_csv(csv_text: str) -> tuple[list[dict[str, Any]], int]:
 
     return linhas_transformadas, erros
 
-
+# Transforma as linhas processadas em CSV
 def linhas_para_csv(linhas: list[dict[str, Any]]) -> str:
-    """Serializa as linhas transformadas de volta para CSV."""
     output_buffer = io.StringIO()
     if linhas:
         writer = csv.DictWriter(output_buffer, fieldnames=linhas[0].keys())
@@ -113,9 +105,10 @@ def linhas_para_csv(linhas: list[dict[str, Any]]) -> str:
         writer.writerows(linhas)
     return output_buffer.getvalue()
 
-
+# Responsável por ler todos os dados do bucket
+# No caso os dados e um objeto
+# Objete é qualquer arquivo presente em um Bucket S3
 def processar_objeto(bucket: str, key: str) -> dict[str, Any]:
-    """Lê um objeto raw/ do S3, transforma e grava o resultado em processed/."""
     if bucket != BUCKET_NAME:
         logger.info(
             "Bucket %s ignorado; esta function está configurada para o bucket '%s' "
