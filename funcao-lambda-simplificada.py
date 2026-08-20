@@ -109,7 +109,6 @@ def linhas_para_csv(linhas: list[dict[str, Any]]) -> str:
 # No caso os dados e um objeto
 # Objeto é qualquer arquivo presente em um Bucket S3
 def processar_objeto() -> dict[str, Any]:
-    logger.info("Lendo objeto: s3://%s/%s", bucket, key)
     try:
 
         key = "consultas_nutricao.csv"
